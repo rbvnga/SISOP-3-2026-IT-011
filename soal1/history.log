@@ -1,0 +1,15 @@
+[2026-04-27 22:39:31] [System] [SERVER ONLINE]
+[2026-04-27 22:39:47] [System] [User 'The Knights' Connected]
+[2026-04-27 22:40:23] [System] [User 'Ann' Connected]
+[2026-04-27 22:40:45] [System] [User 'Sam' Connected]
+[2026-04-27 22:41:27] [User] [Ann]: Hello
+
+[2026-04-27 22:41:48] [User] [Sam]: Happy Holiday
+
+[2026-04-27 22:42:09] [Admin] [RPC_GET_USERS]
+[2026-04-27 22:42:13] [Admin] [RPC_GET_UPTIME]
+[2026-04-27 22:42:28] [System] [User 'Sam' disconnected]
+[2026-04-27 22:43:46] [Admin] [RPC_SHUTDOWN]
+
+[2026-04-27 22:44:08] [System] [User 'The Knights' Connected]
+[2026-04-27 22:44:14] [[System]] [EMERGENCY SHUTDOWN INITIATED]
