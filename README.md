@@ -5,10 +5,10 @@ Nrp : 5027251011 <br>
 ### Deskripsi Permasalahan 
 **The Wired**, infrastruktur digital yang berupa pengembangan sebuah server yang stabil dan aplikasi (client) yang mampu menangani fragmentasi identitas. Aplikasi chat berbasis client-server ini berfokus menciptakan ruang komunikasi anonim di mana batar antara individu dileburkan melalui baris-baris kode sistem operasi, memungkinkan terjadinya sinkronisasi tanpa batas di dalam jaringan. <br>
 ### Struktur Repository
-- `protocoh.h`
-- `protocol.c`
-- `wired.c`
-- `navi.c`
+- `protocoh.h`, sebagai header file (deklarasi) yang berisi: konstanta dan prototype fungsi
+- `protocol.c`, berisi implementasi dari fungsi-fungsi di **protocol.h**
+- `wired.c`, **(Server)** berfungsi untuk menerima koneksi client, mengatur komunikasi antar client, dan mengelola admin.
+- `navi.c`,**(Client)** berfungsi untuk terhubung ke server, mengirim dan menerima pesan
 ### Protocol.h
 ### Protocol.c
 ### navi.c
