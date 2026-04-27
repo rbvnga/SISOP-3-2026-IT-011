@@ -158,7 +158,7 @@ int main() {
     return 0;
 }
 ```
-Setelah dibuat dan dihubungkan ke server, program masuk ke loop tak terbatas. Setiap iterasi dimulai dengan `select()` yang memblokir program sambil menunggu — ia akan "terbangun" hanya jika ada data dari server atau ada input keyboard dari client. Karena keduanya dipantau sekaligus, tidak ada situasi di mana menunggu server membuat keyboard tidak responsif, dan sebaliknya. <br>
+Setelah dibuat dan dihubungkan ke server, program masuk ke loop tak terbatas. Setiap iterasi dimulai dengan `select()` yang memblokir program sambil menunggu, ia akan "terbangun" hanya jika ada data dari server atau ada input keyboard dari client. Karena keduanya dipantau sekaligus, tidak ada situasi di mana menunggu server membuat keyboard tidak responsif, dan sebaliknya. <br>
 ### wired.c
 ```c
 #include <stdio.h>
@@ -457,10 +457,22 @@ int main() {
 - `name` → nama pengguna
 - `is_admin` → penanda apakah user adalah admin
 - `waiting_password` → status menunggu input password
-- `authenticated` → status apakah admin sudah terverifikasi
+- `authenticated` → status apakah admin sudah terverifikasi <br>
 Semua client disimpan dalam array global `clients[MAX_CLIENTS]`, sehingga server dapat menangani banyak client secara bersamaan. <br>
+
 Server menggunakan mekanisme `select()` untuk memantau banyak socket dalam satu waktu tanpa blocking, sehingga mampu melayani banyak client secara real-time. Setiap kali ada koneksi baru, server akan menerimanya melalui `accept()`, mencari slot kosong, lalu meminta memasukkan nama untuk diverifikasi agar tidak sama dengan client lain. `broadcast()` mengirimkan pesan yang telah diformat ke semua client kecuali pengirimnya sendiri dan admin. <br>
+
 "The Knights" sebagai kode untuk admin akan dimintai password (`waiting_password` == 1), jika terverifikasi (`authenticated` == 1) admin mendapat akses ke menu khusus yang memungkinkan melihat daftar user aktif, mengecek waktu uptime server, melakukan shutdown, atau keluar dari sistem. Semua aktivitas System, User (client), dan Admin akan dicatat ke dalam file log. <br>
+### Kode Program
+Kode Program secara lengkap dapat dilihat pada [soal_1]() <br>
+<img width="680" height="324" alt="1_start" src="https://github.com/user-attachments/assets/a8b7f354-4bee-4d6c-94b4-ce3d655f155b" /> <br>
+<img width="362" height="179" alt="1_client ke-1" src="https://github.com/user-attachments/assets/05ae5ce3-f675-44fb-9efd-6ce87a04e11d" /> <br>
+<img width="425" height="211" alt="1_client ke-2" src="https://github.com/user-attachments/assets/fcb8933f-1bf7-42ef-bec7-cf1c04dccc59" /> <br>
+<img width="387" height="606" alt="1_admin console" src="https://github.com/user-attachments/assets/18f1f047-1a96-4c58-9c22-02001114b816" /> <br>
+<img width="383" height="255" alt="1_emergency shutdown" src="https://github.com/user-attachments/assets/a2691263-768b-434f-91e0-802e0e90a02e" /> <br>
+<img width="497" height="279" alt="1_history log" src="https://github.com/user-attachments/assets/9eb0f828-e955-49ad-9c0e-2839fa3adcb1" /> <br>
+
+
 ## Soal 2
 ### Deskripsi Permasalahan 
 Seorang panglima tempur harus membuat arena pertempuran yang terintegrasi. `arena.h` akan menjadi tempat bagaimana pertempuran dimulai, semua srategi dan sistem pertempuran ada disini, `orion.c` akan bertindak sebagi server, dan `eternal.c` akan bertindak sebagi client. <br>
