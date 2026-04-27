@@ -465,7 +465,7 @@ Server menggunakan mekanisme `select()` untuk memantau banyak socket dalam satu 
 "The Knights" sebagai kode untuk admin akan dimintai password (`waiting_password` == 1), jika terverifikasi (`authenticated` == 1) admin mendapat akses ke menu khusus yang memungkinkan melihat daftar user aktif, mengecek waktu uptime server, melakukan shutdown, atau keluar dari sistem. Semua aktivitas System, User (client), dan Admin akan dicatat ke dalam file log. <br>
 ### Kode Program
 Kode Program secara lengkap dapat dilihat pada [soal_1]() <br>
-<img width="680" height="324" alt="1_start" src="https://github.com/user-attachments/assets/a8b7f354-4bee-4d6c-94b4-ce3d655f155b" /> <br>
+<img width="360" height="170" alt="1_start" src="https://github.com/user-attachments/assets/a8b7f354-4bee-4d6c-94b4-ce3d655f155b" /> <br>
 <img width="362" height="179" alt="1_client ke-1" src="https://github.com/user-attachments/assets/05ae5ce3-f675-44fb-9efd-6ce87a04e11d" /> <br>
 <img width="425" height="211" alt="1_client ke-2" src="https://github.com/user-attachments/assets/fcb8933f-1bf7-42ef-bec7-cf1c04dccc59" /> <br>
 <img width="387" height="606" alt="1_admin console" src="https://github.com/user-attachments/assets/18f1f047-1a96-4c58-9c22-02001114b816" /> <br>
