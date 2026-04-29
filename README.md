@@ -2306,5 +2306,4 @@ int main() {
 - `0666`     : permission read+write untuk semua user <br>
 pada main loop, Server terus-menerus menunggu pesan dari client. Setiap pesan diproses secara sequential di main thread. Untuk battle (yang butuh waktu lama), di-spawn thread terpisah. <br>
 ## Kode Program 
-kode program dapat secara lengkap dilihat pada [soal2]() <br>
-
+kode program dapat secara lengkap dilihat pada [soal2](https://github.com/rbvnga/SISOP-3-2026-IT-011/tree/main/soal2) <br>
