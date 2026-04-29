@@ -706,13 +706,14 @@ volatile int battle_result  = -1;
 // tampilan banner di menu
 void print_banner() {
     printf(CYAN);
-    printf("  ______  ____  ______  _____    _____  ____   _     __ \n");
-    printf(" |  ____||_  _||  ____||  __ \\ |_   _|/ __ \\| \\  |  |\n");
-    printf(" | |__    | |  | |__   | |__) |   | | | | || ||  \\ |  |\n");
-    printf(" |  __|   | |  |  __|  |  _  /    | | | | || .|`  \\|  |\n");
-    printf(" | |____  | |  | |____ | | \\ \\ _| |_| |__| ||  | \\  |\n");
-    printf(" |______| |_|  |______||_|  \\_\\_____||____/ |__|  \\_|\n");
+    printf("  ______ _______ ______ _____  _____ ____  _   _ \n");
+    printf(" |  ____|__   __|  ____|  __ \\|_   _/ __ \\| \\ | |\n");
+    printf(" | |__     | |  | |__  | |__) | | || |  | |  \\| |\n");
+    printf(" |  __|    | |  |  __| |  _  /  | || |  | | . ` |\n");
+    printf(" | |____   | |  | |____| | \\ \\ _| || |__| | |\\  |\n");
+    printf(" |______|  |_|  |______|_|  \\_\\____|\\____/|_| \\_|\n");
     printf(RESET);
+    printf("\n         -- Eternal Battle Arena --\n\n");
 }
 ```
 ### Terminal utilies
@@ -2307,3 +2308,18 @@ int main() {
 pada main loop, Server terus-menerus menunggu pesan dari client. Setiap pesan diproses secara sequential di main thread. Untuk battle (yang butuh waktu lama), di-spawn thread terpisah. <br>
 ## Kode Program 
 kode program dapat secara lengkap dilihat pada [soal2](https://github.com/rbvnga/SISOP-3-2026-IT-011/tree/main/soal2) <br>
+- Saat server tidak bekerja
+<img width="536" height="113" alt="2_Server off" src="https://github.com/user-attachments/assets/d5b9d19c-f4c6-4114-aab3-41886113cc77" /> <br>
+- Menu utama
+  <img width="413" height="281" alt="2_menu Utama" src="https://github.com/user-attachments/assets/ab6dea55-6cd3-4bb0-bfbc-216085ca2f59" /> <br>
+- Register
+<img width="328" height="289" alt="2_Register" src="https://github.com/user-attachments/assets/13d9ccd9-77e4-4d3a-93c0-15146ebca731" /> <br>
+- Login
+<img width="313" height="777" alt="2_login" src="https://github.com/user-attachments/assets/cb59f214-0d1f-4572-a529-0afb394e6660" /> <br>
+- Armory
+  <img width="325" height="365" alt="2_armory" src="https://github.com/user-attachments/assets/183a2de8-7c6f-4831-bcb6-549ecfaa8a43" /> <br>
+- Battle
+  <img width="291" height="337" alt="2_battle" src="https://github.com/user-attachments/assets/38e33d01-7c64-4bed-b5f0-cdc1f7fd13db" /> <br>
+- History
+  <img width="357" height="102" alt="2_history" src="https://github.com/user-attachments/assets/d4d623a9-7b04-4704-934e-84bc5cf5e8d3" /> <br>
+
