@@ -1383,9 +1383,319 @@ int main() {
 ```
 Client tidak membuat IPC resource baru, ia hanya membuka resource yang sudah dibuat server. Client (player) hanya di beri akses ke Shared Memory sebagai `SHM_RDONLY` (hanya baca), untuk memastikan client tidak dapat memodifikasi data global secara ilegal dan hanya mengandalkan Message Queue untuk mengirimkan permintaan perubahan data ke server. <br>
 ## orion.c
+Orion adalah server yang selalu berjalan dan menunggu koneksi dari eternal (client). Server menggunakan model multi-threaded:
+- Main Thread        -> Inisialisasi IPC, menunggu pesan masuk dari client
+- Thread per-client  -> Setiap client yang login mendapat thread handler
+- Matchmaking Thread -> Berjalan terus, memproses antrian matchmaking
+Berbeda dengan eternal.c yang hanya membaca, Server (orion.c) harus menulis data ke Shared Memory. Semaphore digunakan sebagai untuk mencegah dua proses menulis di saat yang bersamaan.
+```c
+#include "arena.h"
 
+int shared_memory_id = -1;
+int massage_queue_id = -1;
+int semaphore_id = -1;
+SharedData *shm = NULL; // Pointer ke Shared Memory 
 
+// Antrian matchmaking 
+typedef struct {
+    pid_t pid;
+    char  username[MAX_USERNAME];
+    time_t join_time;
+} MMEntry;
 
+MMEntry mm_queue[MAX_PLAYERS];
+int mm_count = 0; // Penghitung jumlah pemain yang ada dalam antrean saat ini
+//memastikan hanya satu thread yang bisa menambah atau mengurangi pemain dari mm_queue dalam satu waktu
+pthread_mutex_t mm_mutex = PTHREAD_MUTEX_INITIALIZER; 
+
+void sem_wait_op(int semaphore_id) {
+    struct sembuf op = {0, -1, SEM_UNDO};
+    semop(semaphore_id, &op, 1);
+}
+
+void sem_signal_op(int semaphore_id) {
+    struct sembuf op = {0, +1, SEM_UNDO};
+    semop(semaphore_id, &op, 1);
+}
+```
+`pthread_mutex_t mm_mutex` digunakan karena server mungkin menggunakan thread untuk memproses antrean, mutex ini memastikan hanya satu thread yang bisa menambah atau mengurangi pemain dari mm_queue dalam satu waktu. Sebelum Server mengubah data pemain (misal: menambah Gold atau XP), ia memanggil `sem_wait_op()`. Fungsi ini akan mengurangi nilai semaphore. Jika nilainya 0, Server akan menunggu sampai proses lain selesai. Setelah Server selesai memperbarui data, ia memanggil `sem_signal_op` untuk menambah nilai semaphore, memberikan "lampu hijau" bagi proses lain untuk masuk. `SEM_UNDO` digunakan agar jika proses mati tiba-tiba, kernel otomatis undo (melepas kunci) operasi ini sehingga tidak terjadi deadlock permanen. <br>
+```c
+ // cari player berdasarkan user name 
+Player* find_player(const char *username) {
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (shm->players[i].is_registered &&
+            strcmp(shm->players[i].username, username) == 0) {
+            return &shm->players[i];
+        }
+    }
+    return NULL;
+}
+// mencari slot kosong untuk player baru
+Player* find_empty_slot() {
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (!shm->players[i].is_registered) {
+            return &shm->players[i];
+        }
+    }
+    return NULL;
+}
+
+// mencari player berdasarkan PID
+Player* find_player_by_pid(pid_t pid) {
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (shm->players[i].is_registered &&
+            shm->players[i].is_logged_in &&
+            shm->players[i].pid == pid) {
+            return &shm->players[i];
+        }
+    }
+    return NULL;
+}
+```
+```c
+void send_response(pid_t client_pid, int success, const char *data) {
+    Message resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.msg_type = (long)client_pid;
+    resp.action = MSG_RESPONSE;
+    resp.success = success;
+    if (data) strncpy(resp.data, data, sizeof(resp.data) - 1);
+    msgsnd(massage_queue_id, &resp, sizeof(resp) - sizeof(long), 0);
+}
+```
+Untuk mengirimkan pesan respon, server menggunakan PID Client sebagai tipe pesan. Dengan begitu, hanya Client dengan PID tersebut yang bisa mengambil pesan ini dari antrean.`msgsnd` akan mengirimkan paket balasan tersebut kembali ke dalam Message Queue. <br>
+```c
+void handle_register(Message *msg) {
+    sem_wait_op(semaphore_id); // masuk critical section (lock)
+
+    // Cek username sudah ada atau belum
+    Player *existing = find_player(msg->username);
+    if (existing) {
+        sem_signal_op(semaphore_id); //keluar critical section (unlock)
+        send_response(msg->sender_pid, 0, "Username already taken!");
+        return;
+    }
+
+    // jika sudah tidak ada slot yang tersedia
+    Player *slot = find_empty_slot();
+    if (!slot) {
+        sem_signal_op(semaphore_id); //keluar critical section (unlock)
+        send_response(msg->sender_pid, 0, "Server full!");
+        return;
+    }
+
+    // Inisialisasi player baru dengan default stats
+    memset(slot, 0, sizeof(Player));
+    strncpy(slot->username, msg->username, MAX_USERNAME - 1);
+    strncpy(slot->password, msg->password, MAX_PASSWORD - 1);
+    slot->gold = BASE_GOLD;
+    slot->lvl = BASE_LVL;
+    slot->xp = BASE_XP;
+    slot->weapon_index = -1; // belum ada senjata
+    slot->is_registered = 1;
+    slot->in_battle = 0;
+    slot->in_matchmaking= 0;
+    slot->is_logged_in  = 0;
+    slot->history_count = 0;
+
+    shm->player_count++;
+
+    sem_signal_op(semaphore_id); //keluar critical section (unlock)
+    send_response(msg->sender_pid, 1, "Registration successful!");
+    printf("[ORION] New player registered: %s\n", msg->username);
+}
+
+void handle_login(Message *msg) {
+    sem_wait_op(semaphore_id);
+
+    // validasi username
+    Player *p = find_player(msg->username);
+    if (!p) {
+        sem_signal_op(semaphore_id);
+        send_response(msg->sender_pid, 0, "Username not found!");
+        return;
+    }
+
+    // validasi password
+    if (strcmp(p->password, msg->password) != 0) {
+        sem_signal_op(semaphore_id);
+        send_response(msg->sender_pid, 0, "Wrong password!");
+        return;
+    }
+
+    // Cek apakah sudah login di sesi lain
+    if (p->is_logged_in) {
+        sem_signal_op(semaphore_id);
+        send_response(msg->sender_pid, 0, "Account already in use!");
+        return;
+    }
+
+    p->is_logged_in = 1;
+    p->pid = msg->sender_pid;
+
+    // kirim data player
+    char data[256];
+    snprintf(data, sizeof(data), "%s|%d|%d|%d|%d",
+             p->username, p->lvl, p->gold, p->xp, p->weapon_index);
+
+    sem_signal_op(semaphore_id);
+
+    Message resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.msg_type = (long)msg->sender_pid;
+    resp.action = MSG_RESPONSE;
+    resp.success = 1;
+    strncpy(resp.username, p->username, MAX_USERNAME - 1);
+    strncpy(resp.data, data, sizeof(resp.data) - 1);
+    msgsnd(massage_queue_id, &resp, sizeof(resp) - sizeof(long), 0);
+
+    printf("[ORION] Player logged in: %s (PID: %d)\n", msg->username, msg->sender_pid);
+}
+
+void handle_logout(Message *msg) {
+    sem_wait_op(semaphore_id);
+
+    Player *p = find_player_by_pid(msg->sender_pid);
+    if (p) {
+        // Jika sedang dalam matchmaking, keluarkan dulu 
+        p->in_matchmaking = 0;
+        p->is_logged_in = 0;
+        p->pid = 0;
+    }
+
+    sem_signal_op(semaphore_id);
+    send_response(msg->sender_pid, 1, "Logged out.");
+}
+```
+Server melakukan validasi ganda dengan memeriksa ketersediaan username dan ketersediaan slot memori sebelum menginisialisasi atribut dasar pemain seperti Gold, Level, dan XP. Seluruh proses penulisan data baru ini dibungkus di dalam Critical Section (`sem_wait` dan `sem_signal`). pada fungsi login, jika validasi berhasil, server akan mencatat PID client ke dalam memori untuk jalur komunikasi spesifik dan membungkus data statistik pemain ke dalam format string terpisah pipa (`|`). Data ini kemudian dikirimkan kembali ke client melalui Message Queue menggunakan PID pengirim sebagai label alamat pesan (`msg_type`). 
+```c
+void handle_buy_weapon(Message *msg) {
+    int weapon_idx = msg->int_data;
+
+    // jika weapon yang di pilih diluar list atau melebihi kapasitas 
+    if (weapon_idx < 0 || weapon_idx >= MAX_WEAPONS) {
+        send_response(msg->sender_pid, 0, "Invalid weapon!");
+        return;
+    }
+
+    sem_wait_op(semaphore_id);
+
+    Player *p = find_player_by_pid(msg->sender_pid);
+    if (!p) {
+        sem_signal_op(semaphore_id);
+        send_response(msg->sender_pid, 0, "Not logged in!");
+        return;
+    }
+
+    int price = WEAPON_LIST[weapon_idx].price;
+    // jika gold yang dimiliki tidak cukup
+    if (p->gold < price) {
+        sem_signal_op(semaphore_id);
+        send_response(msg->sender_pid, 0, "Not enough gold!");
+        return;
+    }
+
+    // Sistem otomatis pakai senjata damage terbesar
+    int current_bonus = (p->weapon_index >= 0) ? WEAPON_LIST[p->weapon_index].bonus_damage : 0;
+    if (WEAPON_LIST[weapon_idx].bonus_damage > current_bonus) {
+        p->weapon_index = weapon_idx;
+    }
+    // menghitung jumlah gold setelah membeli
+    p->gold -= price;
+
+    char data[128];
+    snprintf(data, sizeof(data), "Bought %s! Gold: %d",
+             WEAPON_LIST[weapon_idx].name, p->gold);
+
+    sem_signal_op(semaphore_id);
+    // kirim pesan balasan
+    send_response(msg->sender_pid, 1, data);
+}
+
+void handle_view_history(Message *msg) {
+    sem_wait_op(semaphore_id);
+
+    Player *p = find_player_by_pid(msg->sender_pid);
+    if (!p) {
+        sem_signal_op(semaphore_id);
+        send_response(msg->sender_pid, 0, "Not logged in!");
+        return;
+    }
+
+    Message resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.msg_type = (long)msg->sender_pid;
+    resp.action = MSG_VIEW_HISTORY;
+    resp.success = 1;
+    // cek jumlah pertandingan yang pernah dilakukan 
+    resp.int_data = p->history_count;
+
+    char buf[256] = "";
+    int  n = p->history_count;
+    // Kirim maksimal 10 history terakhir per pesan 
+    int start = (n > 10) ? n - 10 : 0;
+    for (int i = start; i < n; i++) {
+        char entry[64];
+        snprintf(entry, sizeof(entry), "%s|%d|%d|%d|%d;",
+                 p->history[i].opponent,
+                 p->history[i].result,
+                 p->history[i].xp_gained,
+                 p->history[i].hour,
+                 p->history[i].minute);
+        strncat(buf, entry, sizeof(buf) - strlen(buf) - 1);
+    }
+    strncpy(resp.data, buf, sizeof(resp.data) - 1);
+
+    sem_signal_op(semaphore_id);
+    // kirim pesan
+    msgsnd(massage_queue_id, &resp, sizeof(resp) - sizeof(long), 0);
+}
+
+// Argumen yang diteruskan ke thread battle
+typedef struct {
+    pid_t pid_a;
+    pid_t pid_b;
+    char name_a[MAX_USERNAME];
+    char name_b[MAX_USERNAME];
+    int is_bot_b; // Cek apakah player b bot (== 1)
+} BattleArgs;
+
+// Kirim battle update ke kedua client
+void send_battle_update(pid_t pid_a, pid_t pid_b,
+                        int hp_a, int max_hp_a,
+                        int hp_b, int max_hp_b,
+                        char logs[MAX_LOG][128],
+                        const char *name_a, const char *name_b,
+                        int damage_a, int damage_b,
+                        int cd_a, int cd_b,
+                        int ulti_a, int ulti_b) {
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+             "%s|%d|%d|%s|%d|%d|%s|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d",
+             name_a, hp_a, max_hp_a,
+             name_b, hp_b, max_hp_b,
+             logs[0], logs[1], logs[2], logs[3], logs[4],
+             damage_a, damage_b, cd_a, cd_b, ulti_a, ulti_b);
+
+    // Kirim ke player A
+    Message m;
+    memset(&m, 0, sizeof(m));
+    m.msg_type  = (long)pid_a;
+    m.action = MSG_BATTLE_UPDATE;
+    strncpy(m.data, buf, sizeof(m.data) - 1);
+    msgsnd(massage_queue_id, &m, sizeof(m) - sizeof(long), 0);
+
+    // Kirim ke player B, jika bukan bot
+    if (pid_b != 0) {
+        m.msg_type = (long)pid_b;
+        msgsnd(massage_queue_id, &m, sizeof(m) - sizeof(long), 0);
+    }
+}
+```
+Pada fungsi `handle_buy_weapon` jika semua syarat terpenuhi, server secara otomatis akan memperbarui atribut `weapon_index` dan mengurangi saldo Gold di dalam critical section. Hasil transaksi ini kemudian dikirimkan kembali ke client dalam format string terformat. Sementara itu,`handle_view_history` menggabungkan data riwayat pertandingan pemain dari Shared Memory menjadi satu string panjang. Server membatasi tampilan hanya untuk 10 pertandingan terakhir yang dikirim melalui Message Queue. Setiap entri riwayat, yang mencakup nama lawan, hasil laga, XP, dan waktu, dipisahkan menggunakan tanda pipa (|) dan diakhiri dengan titik koma (;) sebagai pembatas antar rekaman. Dengan menggunakan PID pengirim sebagai alamat tujuan pesan (`msg_type`). <br>
+```c
+
+```
 ## Kode Program 
 kode program dapat secara lengkap dilihat pada [soal2]() <br>
 
