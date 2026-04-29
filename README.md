@@ -1016,7 +1016,6 @@ void matchmaking() {
 }
 ```
 `MSG_MATCHMAKING` dikirim ke server lalu masuk ke loop untuk menampilkan animasi loading sekaligus memeriksa pesan terus-menerus dengan flag `IPC_NOWAIT`. Jika lawan ditemukan, server akan mengirim data nama plauer atau bot sebagai lawan lalu masuk ke fase pertarungan. <br>
-### 
 ### Tampilan battle screen
 ```c
 void render_battle(const char *data, int is_player_a) {
@@ -1075,7 +1074,318 @@ void render_battle(const char *data, int is_player_a) {
     printf("\n  [A] Attack  [U] Ultimate\n");
     fflush(stdout);
 }
-
 ```
+### Battle 
+```c
+// Argumen untuk thread battle
+typedef struct {
+    int is_player_a;
+    char opponent[MAX_USERNAME];
+} BattleUIArgs;
+
+// Menerima update dari server dan render UI
+void* battle_recv_thread(void *arg) {
+    BattleUIArgs *bua = (BattleUIArgs*)arg;
+
+    while (battle_running) {
+        Message msg;
+        memset(&msg, 0, sizeof(msg));
+
+        // cek update battle 
+        int r = msgrcv(massage_queue_id, &msg, sizeof(msg) - sizeof(long),
+                       (long)getpid(), IPC_NOWAIT);
+
+        if (r > 0) {
+            // jika menerima pesan untuk me-render battle 
+            if (msg.action == MSG_BATTLE_UPDATE) {
+                render_battle(msg.data, bua->is_player_a);
+            } 
+            // jika server mengirim pesan bahwa pertarungan selesai (salah satu playyer mati)
+            else if (msg.action == MSG_BATTLE_END) {
+                battle_running = 0;
+                battle_result  = msg.success;
+            }
+        }
+
+        usleep(50000);
+    }
+
+    free(bua);
+    return NULL;
+}
+
+
+void battle(const char *opponent, int is_player_a) {
+    battle_running = 1;
+    battle_result  = -1; // belum ada hasil pertandingan
+    // mengaktifkan raw mode
+    enable_raw_mode();
+     // buang sisa karakter dari menu sebelumnya
+    {
+        char flush_buf;
+        while (read(STDIN_FILENO, &flush_buf, 1) > 0) { /* buang semua */ }
+    }
+
+    // Spawn receiver thread 
+    BattleUIArgs *bua = malloc(sizeof(BattleUIArgs));
+    bua->is_player_a = is_player_a;
+    strncpy(bua->opponent, opponent, MAX_USERNAME - 1);
+
+    // Multithreading
+    pthread_t recv_tid;
+    pthread_create(&recv_tid, NULL, battle_recv_thread, bua);
+
+    while (battle_running) {
+        char c = 0;
+        // baca input
+        int r = read(STDIN_FILENO, &c, 1);
+        if (r > 0) {
+            if (c == 'a' || c == 'A') {
+                // warrior menyerang (attack)
+                send_battle_action(MSG_ATTACK);   
+            } else if (c == 'u' || c == 'U') {
+                // warrior me-ultimate 
+                send_battle_action(MSG_ULTIMATE);  
+            }
+        }
+        usleep(10000); 
+    }
+
+    // Mengembalikan terminal ke mode normal setelah pertandingan selesai
+    disable_raw_mode();
+
+    // Tunggu receiver thread selesai 
+    pthread_join(recv_tid, NULL);
+
+    // menampilkan hasil pertandingan dan menambah state playernya
+    clear_screen();
+    if (battle_result == 1) {
+        printf(GREEN "\n  -=- VICTORY -═-\n" RESET);
+        printf("  XP gained: +%d\n", XP_WIN);
+        printf("  Gold gained: +%d\n", GOLD_WIN);
+        current_xp   += XP_WIN;
+        current_gold += GOLD_WIN;
+    } else {
+        printf(RED "\n  -═- DEFEAT -═-\n" RESET);
+        printf("  XP gained: +%d\n", XP_LOSS);
+        printf("  Gold gained: +%d\n", GOLD_LOSS);
+        current_xp   += XP_LOSS;
+        current_gold += GOLD_LOSS;
+    }
+    current_lvl = 1 + (current_xp / 100);
+
+    printf("\n  Battle ended. Press [ENTER] to continue...");
+    fflush(stdout);
+
+    {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) { }
+    }
+}
+```
+Pada fase battle, program dalam mode raw sehingga setiap tombol langsung terdeteksi tanpa menunggu Enter. Tombol 'a' = attack, 'u' = ultimate. Input dikirim ke server sebagai `MSG_ATTACK` atau `MSG_ULTIMATE`. Multhithreading di terapkan untuk mendengarkan (listen) input dari keyboard dan tread baru `recv_tid` bertugas memantau pembaruan status pertempuran dari server melalui Message Queue secara real-time tanpa memblokir (interrupt) alur input pemain pada thread utama. Selain itu, program juga akan menampilkan hasil pertandingan beserta hadiah yang diperoleh, sementara server damage calculation dan cooldown enforcement . <br>
+### Armory dan History 
+```c
+void armory() {
+    while (1) {
+        clear_screen();
+        printf("-=-=-=-=-=-=- ARMORY -=-=-=-=-=-=-\n");
+        // menampilkan gold yang dimiliki
+        printf(" Gold: %d\n\n", current_gold);
+
+        for (int i = 0; i < MAX_WEAPONS; i++) {
+            printf("  %d. %-15s | %4d G  +%d Damage",
+                   i + 1,
+                   WEAPON_LIST[i].name,
+                   WEAPON_LIST[i].price,
+                   WEAPON_LIST[i].bonus_damage);
+            if (current_weapon == i) printf(GREEN " [EQUIPPED]" RESET);
+            printf("\n");
+        }
+        printf("  0. Back \nChoice: ");
+        fflush(stdout);
+
+        int choice;
+        scanf("%d", &choice);
+
+        // back
+        if (choice == 0) break;
+        // jika pilihan weapon tidak valid
+        if (choice < 1 || choice > MAX_WEAPONS) continue;
+
+        // kirim pesan ke server bahwa player membeli senjata 
+        send_to_server(MSG_BUY_WEAPON, current_user, NULL, NULL, choice - 1);
+
+        Message resp;
+        if (recv_from_server(&resp, 5) > 0) {
+            if (resp.success) {
+                //Update gold dan weapon
+                sscanf(resp.data, "Bought %*[^!]! Gold: %d", &current_gold);
+                // senjata hanya otomatis terpasang jika memiliki damage lebih besar dari yang dimiliki
+                if (WEAPON_LIST[choice-1].bonus_damage >
+                    (current_weapon >= 0 ? WEAPON_LIST[current_weapon].bonus_damage : 0)) {
+                    current_weapon = choice - 1;
+                }
+                printf("  " GREEN "%s" RESET "\n", resp.data);
+            } else {
+                printf("  " RED "%s" RESET "\n", resp.data);
+            }
+        }
+        sleep(1);
+    }
+}
+
+
+void history() {
+    send_to_server(MSG_VIEW_HISTORY, current_user, NULL, NULL, 0);
+
+    Message resp;
+     // jika dalam 5 detik server tidak menjawab
+    if (recv_from_server(&resp, 5) <= 0) {
+        printf("  " RED "Failed to fetch history" RESET "\n");
+        sleep(2);
+        return;
+    }
+
+    clear_screen();
+    printf("  ══════════════════ MATCH HISTORY ══════════════════\n");
+    printf("  %-6s %-16s %-6s %-6s\n", "Time", "Opponent", "Res", "XP");
+    printf("  ──────────────────────────────────────────────────\n");
+
+    // Parse pesan history yang diterima
+    char *entry = resp.data;
+    char *tok;
+    while ((tok = strsep(&entry, ";")) != NULL && *tok) {
+        char opp[MAX_USERNAME];
+        int result, xp, hh, mm;
+        if (sscanf(tok, "%31[^|]|%d|%d|%d|%d", opp, &result, &xp, &hh, &mm) == 5) {
+            printf("  %02d:%02d  %-16s %-6s +%d XP\n",
+                   hh, mm, opp,
+                   result ? GREEN "WIN" RESET : RED "LOSS" RESET,
+                   xp);
+        }
+    }
+
+    if (resp.int_data == 0) {
+        printf("  (no history yet)\n");
+    }
+
+    printf("\n  Press any key...");
+    fflush(stdout);
+    getchar(); getchar();
+}
+```
+`armory()` akan menampilkan gold yang dimiliki dan senjata yang di sediakan berserta harga dan buff nya. Transaksi dimulali dengan mengirim pesan `MSG_BUY_WEAPON`, lalu server akan mengecek di Shared Memory apakah Gold pemain cukup dan player akan menunggu jawaban  melalui `recv_from_server`. <br>
+
+`history()` mengirim pesan `MSG_VIEW_HISTORY` beserta `current_user` ke server. lalu memisahkan entri dengan perintah `strep` dan `sscanf` untuk memisahkan atribut, sehingga data mentah yang diterima dari server dapat di sajikan kembali. <br>
+### Manajemen sumber daya
+```c
+void client_cleanup() {
+    if (is_logged_in) {
+        send_to_server(MSG_LOGOUT, current_user, NULL, NULL, 0);
+    }
+    if (shm) shmdt(shm);
+    disable_raw_mode();
+}
+void sig_handler(int sig) {
+    (void)sig;
+    printf("\n  [ETERNAL] Disconnecting...\n");
+    client_cleanup();
+    exit(0);
+}
+```
+`client_cleanup` memutuskan hubungan antara ruang alamat proses Client dengan blok memori bersama. `sig_handler` merupakan interupsi untuk menangani kejadian tak terduga. <br>
+### Fungsi Main
+```c
+int main() {
+    signal(SIGINT,  sig_handler);
+    signal(SIGTERM, sig_handler);
+
+    massage_queue_id = msgget(MSG_KEY, 0666);
+    // Jika server belum berjalan
+    if (massage_queue_id < 0) {
+        fprintf(stderr, "Orion are you there?\n");
+        fprintf(stderr, "(Server not running. Start orion first!)\n");
+        exit(1);
+    }
+
+    // Attach shared memory (read-only untuk display, tidak write langsung)
+    shared_memory_id = shmget(SHARED_MEMORY_KEY, sizeof(SharedData), 0666);
+    if (shared_memory_id >= 0) {
+        shm = (SharedData*)shmat(shared_memory_id, NULL, SHM_RDONLY);
+        if (shm == (SharedData*)-1) shm = NULL;
+    }
+
+    // Cek koneksi ke server
+    if (!check_server()) {
+        fprintf(stderr, "Orion are you there?\n");
+        fprintf(stderr, "(Server not responding!)\n");
+        exit(1);
+    }
+
+    while (1) {
+        if (!is_logged_in) {
+            show_main_menu();
+
+            int choice;
+            scanf("%d", &choice);
+
+            switch (choice) {
+                case 1:
+                    do_register();
+                    break;
+                case 2:
+                    if (login()) {
+                    }
+                    break;
+                case 3:
+                    printf("\n  Goodbye, warrior!\n");
+                    client_cleanup();
+                    return 0;
+                default:
+                    break;
+            }
+        } else {
+            // masuk dunia eterion
+            show_game_menu();
+
+            int choice;
+            scanf("%d", &choice);
+
+            switch (choice) {
+                case 1:
+                    matchmaking();
+                    break;
+                case 2:
+                    armory();
+                    break;
+                case 3:
+                    history();
+                    break;
+                case 4: //logout
+                    send_to_server(MSG_LOGOUT, current_user, NULL, NULL, 0);
+                    Message resp;
+                    recv_from_server(&resp, 3);
+                    is_logged_in = 0;
+                    memset(current_user, 0, sizeof(current_user));
+                    printf("  " YELLOW "Logged out." RESET "\n");
+                    sleep(1);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    client_cleanup();
+    return 0;
+}
+```
+Client tidak membuat IPC resource baru, ia hanya membuka resource yang sudah dibuat server. Client (player) hanya di beri akses ke Shared Memory sebagai `SHM_RDONLY` (hanya baca), untuk memastikan client tidak dapat memodifikasi data global secara ilegal dan hanya mengandalkan Message Queue untuk mengirimkan permintaan perubahan data ke server. <br>
 ## orion.c
+
+
+
+## Kode Program 
+kode program dapat secara lengkap dilihat pada [soal2]() <br>
 
