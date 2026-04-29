@@ -2322,4 +2322,6 @@ kode program dapat secara lengkap dilihat pada [soal2](https://github.com/rbvnga
   <img width="291" height="337" alt="2_battle" src="https://github.com/user-attachments/assets/38e33d01-7c64-4bed-b5f0-cdc1f7fd13db" /> <br>
 - History
   <img width="357" height="102" alt="2_history" src="https://github.com/user-attachments/assets/d4d623a9-7b04-4704-934e-84bc5cf5e8d3" /> <br>
+- Server
+  <img width="371" height="412" alt="2_server" src="https://github.com/user-attachments/assets/5b40fff8-e252-42f8-ae6a-d9dada87dab3" /> <br>
 
